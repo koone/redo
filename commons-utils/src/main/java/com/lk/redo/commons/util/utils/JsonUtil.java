@@ -3,6 +3,7 @@ package com.lk.redo.commons.util.utils;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -18,6 +19,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -67,12 +69,61 @@ public class JsonUtil {
         }
     }
 
+    public static  <T>  T toBeanWithJavaType(String source, JavaType javaType){
+        try {
+            return objectMapper.readValue(source, javaType);
+        } catch (IOException e) {
+            throw new RuntimeException("json to bean error!~" , e);
+        }
+    }
+
+    public static  <T>  T[] toArray(String json , Class<T> clazz){
+        if(StringUtils.isEmpty(json)){
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, objectMapper.getTypeFactory().constructArrayType(clazz));
+        } catch (IOException e) {
+            throw new RuntimeException("json to bean error!~" , e);
+        }
+    }
+
     public static <T> List<T> toList(String json , Class<T> clazz) {
         if(StringUtils.isEmpty(json)){
             return null;
         }
         try {
             return objectMapper.readValue(json , objectMapper.getTypeFactory().constructParametricType(List.class, clazz));
+        } catch (IOException e) {
+            log.error("pase json error! , "+json);
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static <T> Collection<T> toCollection(String json , Class collectionClazz, Class<T> clazz) {
+        if(StringUtils.isEmpty(json)){
+            return null;
+        }
+        if(collectionClazz.isAssignableFrom(Collection.class)){
+            throw new IllegalArgumentException("not a collection class");
+        }
+        try {
+            return objectMapper.readValue(json , objectMapper.getTypeFactory().constructParametricType(collectionClazz, clazz));
+        } catch (IOException e) {
+            log.error("pase json error! , "+json);
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static <K,V> Map<K,V> toMap(String json , Class mapClazz, Class<K> keyClass , Class<V> valueClass) {
+        if(StringUtils.isEmpty(json)){
+            return null;
+        }
+        if(mapClazz.isAssignableFrom(Map.class)){
+            throw new IllegalArgumentException("not a map class");
+        }
+        try {
+            return objectMapper.readValue(json , objectMapper.getTypeFactory().constructParametricType(mapClazz, keyClass,valueClass));
         } catch (IOException e) {
             log.error("pase json error! , "+json);
             throw new RuntimeException(e);

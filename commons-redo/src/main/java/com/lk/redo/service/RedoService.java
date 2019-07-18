@@ -1,5 +1,6 @@
 package com.lk.redo.service;
 
+import com.google.common.collect.Lists;
 import com.lk.redo.annotation.Redo;
 import com.lk.redo.commons.util.enums.VoCodeEnum;
 import com.lk.redo.commons.util.exception.BusinessException;
@@ -19,9 +20,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 
 /**
  * redo service
@@ -170,7 +169,7 @@ public class RedoService extends ApplicationObjectSupport {
      * 将bizInvokeArgs数组中的每个arg按照格式排列: <br>
      * arg0ClazzName, arg0ValueJsonStr, arg1ClazzName, arg1ValueJsonStr, arg2ClazzName, arg2ValueJsonStr<br>
      * 重排之后的队列序列化成json array string，存入到持久化层
-     *
+     * @see com.lk.redo.service.DefaultRedoHandler#deserialize(Class[], String)
      * @return json array string
      */
     public String serialize(Object[] args) {
@@ -180,7 +179,8 @@ public class RedoService extends ApplicationObjectSupport {
         List<Object> argNameAndValueList = new ArrayList<Object>();
         for (Object arg : args) {
             if (arg != null) {
-                argNameAndValueList.add(arg.getClass().getName());
+                //argNameAndValueList.add(arg.getClass()); // 泛型对象在运行时拿不到真实的泛型类型
+                argNameAndValueList.add(getRealTypeName(arg)); // 泛型对象在运行时拿不到真实的泛型类型
                 argNameAndValueList.add(JsonUtil.toJson(arg));
             }else{
                 argNameAndValueList.add(null);
@@ -189,6 +189,74 @@ public class RedoService extends ApplicationObjectSupport {
 
         }
         return JsonUtil.toJson(argNameAndValueList);
+    }
+
+    /**
+     *  获取对象实际类型，在反序列化时明确类型, 配合JsonUtil做反序列化使用<br/>
+     *  普通类型直接获取<br/>
+     *  泛型类型需要取出实际泛型值，只对Array、Collection、Map两种常用泛型类别
+     *
+     * @see com.lk.redo.service.DefaultRedoHandler#deserializeByJson(String, String)
+     * @param param
+     * @return
+     */
+    private String getRealTypeName(Object param){
+        // 获取基本类型
+        Class clazz = param.getClass();
+        String typeName = clazz.getName();
+        if (clazz.isArray()) {
+            // array type
+            // do nothing
+        }else if (param instanceof Collection){
+            // collection type
+            // get first object type
+            Collection collectionParam = (Collection) param;
+            if (!collectionParam.isEmpty()) {
+                String itemType = null;
+                Iterator iterator = collectionParam.iterator();
+                while (iterator.hasNext() && itemType != null) {
+                    Object item = iterator.next();
+                    if (null != item) {
+                        itemType = item.getClass().getName();
+                        break;
+                    }
+                }
+                if (null != itemType) {
+                    typeName = typeName + "<" + itemType == null ? "" : itemType + ">";
+                }
+            }
+        } else if (param instanceof Map) {
+            // map type
+            // get first object type
+            Map mapParam = (Map) param;
+            if (!mapParam.isEmpty()) {
+                String keyType = null;
+                String valueType = null;
+                Iterator keySetIt = mapParam.keySet().iterator();
+                while (keySetIt.hasNext() && (null == keyType || null == valueType)) {
+                    Object key = keySetIt.next();
+                    if (null == keyType && null != key) {
+                        keyType = key.getClass().getName();
+                    }
+                    Object value = mapParam.get(key);
+                    if (null == valueType && null != value) {
+                        valueType = value.getClass().getName();
+                    }
+                }
+                if (null != valueType && null != keyType) {
+                    typeName = typeName+ "<" + keyType == null ? "" : keyType + ","+ valueType == null ? "" :valueType + ">";
+                }
+            }
+        }
+        return typeName;
+    }
+
+    public static void main(String[] args) {
+        String[] aa = new String[]{"1", "2"};
+        List<String> bb = Lists.newArrayList("1", "2");
+        System.out.println(JsonUtil.toJson(aa));
+        System.out.println(JsonUtil.toJson(bb));
+        JsonUtil.toList("[\"1\",\"2\"]", String.class).toArray();
     }
 
 

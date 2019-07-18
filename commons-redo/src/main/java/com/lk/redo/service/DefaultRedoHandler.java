@@ -1,9 +1,13 @@
 package com.lk.redo.service;
 
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.type.TypeFactory;
+import com.fasterxml.jackson.databind.type.TypeParser;
 import com.lk.redo.commons.util.utils.JsonUtil;
 import com.lk.redo.model.RedoException;
 import com.lk.redo.model.SysRedo;
 import com.lk.redo.util.RedoCheckUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.aop.scope.ScopedProxyUtils;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.ApplicationObjectSupport;
@@ -13,6 +17,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 
 /**
@@ -26,10 +32,15 @@ import java.util.Map;
 @Service("defaultRedoHandler")
 public class DefaultRedoHandler extends ApplicationObjectSupport implements RedoHandler {
 
+
+    private static final Pattern arrayPattern = Pattern.compile("\\[L.+;"); // 数组类型正则
+    private static final Pattern collectionPattern = Pattern.compile("(.+)<([^,]+)>"); //集合类型正则
+    private static final Pattern mapPattern = Pattern.compile("(.+)<(.+),(.+)>"); // map类型正则
+
     @Override
     public void redo(SysRedo redoItem) {
         RedoCheckUtils.check((null == redoItem || redoItem.getBizInvokeClazz() == null || redoItem.getBizInvokeMethod() == null),
-            "bizInvokeClazz is null, and cannot be handled by defaultRedoHandler");
+                "bizInvokeClazz is null, and cannot be handled by defaultRedoHandler");
         Class<?> bizClazz = null;
         try {
             bizClazz = Class.forName(redoItem.getBizInvokeClazz());
@@ -50,9 +61,9 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
         } catch (Exception e) {
             throw new RedoException("failed to get biz method for " + redoItem, e);
         }
-        // invoke
-        Object[] args = deserialize(methodArgTypes,redoItem.getBizInvokeArgs());
         try {
+            // invoke
+            Object[] args = deserialize(redoItem.getBizInvokeArgs());
             m.invoke(bizBean, args);
         } catch (Exception e) {
             throw new RedoException("failed to invoke biz method for " + redoItem, e);
@@ -62,38 +73,28 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
     /**
      * 将getBizInvokeArgsStr()序列化得到的json array string，反序列化
      *
-     *
-     * @param methodArgTypes
+     * @see com.lk.redo.service.RedoService#serialize(Object[])
      * @param bizInvokeArgsStr 序列化的json array string
      * @return argValue pair
      */
-    public static Object[] deserialize(Class[] methodArgTypes, String bizInvokeArgsStr) {
+    public Object[] deserialize(String bizInvokeArgsStr) throws ClassNotFoundException {
         if (bizInvokeArgsStr == null || bizInvokeArgsStr.trim().isEmpty()) {
             return null;
         }
         List<String> argNameAndValueList = JsonUtil.toList(bizInvokeArgsStr, String.class);
         Iterator<String> iterator = argNameAndValueList.iterator();
         List<Object> args = new ArrayList<Object>();
-        int index = 0;
         while (iterator.hasNext()) {
             String clazzName = iterator.next();
             String argValue = iterator.next();
             Class<?> clazz = null;
-            try {
-                if (clazzName == null || clazzName == "null") {
-                    clazz = methodArgTypes[index];
-                }else {
-                    clazz = Class.forName(clazzName);
-                }
-            } catch (ClassNotFoundException e) {
-                throw new RuntimeException(e);
-            }
             Object arg = null;
-            if (clazz != null && argValue != null) {
-                arg = JsonUtil.toBean(argValue, clazz);
+            if (clazzName == null || clazzName == "null" || StringUtils.isBlank(clazzName)) {
+                // do nothing
+            }else {
+                arg = deserializeByJson(clazzName, argValue);
             }
             args.add(arg);
-            index++;
         }
         return args.toArray();
     }
@@ -113,5 +114,108 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
         RedoCheckUtils.check(bizBeans != null && bizBeans.size() == 1);
         Object bizBean = bizBeans.values().iterator().next();
         return bizBean;
+    }
+
+    /**
+     * 通过json 反序列化：支持普通类型、Array类型、Collection、Map类型
+     *
+     * @see com.lk.redo.service.RedoService#getRealTypeName(Object)
+     * @param typeStr 数据类型
+     * @param dataJsonStr 数据json字符串
+     * @return
+     */
+    private Object deserializeByJson(String typeStr, String dataJsonStr) throws ClassNotFoundException {
+        // array type
+        Matcher arrayMacher = arrayPattern.matcher(typeStr);
+        if (arrayMacher.find()){
+            Class clazz = Class.forName(typeStr);
+            return JsonUtil.toArray(dataJsonStr, clazz);
+        }
+        // collection type
+        Matcher collectionMacher = collectionPattern.matcher(typeStr);
+        if (collectionMacher.find()){
+            String collectionTypeStr = collectionMacher.group(1);
+            String genericTypeStr =  collectionMacher.group(2);
+            Class collectionClazz = Class.forName(collectionTypeStr);
+            Class contentClazz = Class.forName(genericTypeStr);
+            return JsonUtil.toCollection(dataJsonStr, collectionClazz, contentClazz);
+        }
+        // map type
+        Matcher mapMacher = mapPattern.matcher(typeStr);
+        if (mapMacher.find()){
+            String mapTypeStr = mapMacher.group(1);
+            String keyTypeStr = mapMacher.group(2);
+            String valueTypeStr = mapMacher.group(3);
+            Class mapClazz = Class.forName(mapTypeStr);
+            Class keyClazz = Class.forName(keyTypeStr);
+            Class valueClazz = Class.forName(valueTypeStr);
+            return JsonUtil.toMap(dataJsonStr, mapClazz, keyClazz, valueClazz);
+        }
+        // normal type
+        Class clazz = Class.forName(typeStr);
+        return JsonUtil.toBean(dataJsonStr, clazz);
+    }
+
+    public static void main(String[] args) throws ClassNotFoundException {
+        // test array
+        String typeStr = "[Ljava.lang.String;";
+        Pattern p = Pattern.compile("\\[L.+;");
+        Matcher m = p.matcher(typeStr);
+        Class clazz = null;
+        String data = null;
+        Object object = null;
+        if (m.find()) {
+            clazz = Class.forName(typeStr);
+            data = "[\"1\",\"2\"]";
+            object = JsonUtil.toArray(data, clazz);
+            System.out.println(object);
+        }
+        // test complex array
+        typeStr = "[Lcom.lk.redo.model.SysRedo;";
+        clazz = Class.forName(typeStr);
+        data = "[{\"id\":1},{\"id\":2}]";
+        object = JsonUtil.toArray(data, clazz);
+        System.out.println(object);
+
+        // test collection
+        typeStr = "java.util.ArrayList<java.lang.String>";
+        p = Pattern.compile("(.+)<([^,]+)>");
+        m = p.matcher(typeStr);
+        String collectionTypeStr = null;
+        String genericTypeStr = null;
+        if (m.find()) {
+            collectionTypeStr = m.group(1);
+            genericTypeStr = m.group(2);
+        }
+        data = "[\"1\",\"2\"]";
+        Class collectionClazz = Class.forName(collectionTypeStr);
+        Class contentClazz = Class.forName(genericTypeStr);
+        object = JsonUtil.toCollection(data, collectionClazz, contentClazz);
+        System.out.println(object);
+
+        // test map
+        typeStr = "java.util.HashMap<java.lang.String,java.lang.Long>";
+        p = Pattern.compile("(.+)<(.+),(.+)>");
+        m = p.matcher(typeStr);
+        String mapTypeStr = null;
+        String keyTypeStr = null;
+        String valueTypeStr = null;
+        if (m.find()) {
+            mapTypeStr = m.group(1);
+            keyTypeStr = m.group(2);
+            valueTypeStr = m.group(3);
+        }
+        data = "{\"a\": 1,\"b\": 2,\"c\": 3}";
+        Class mapClazz = Class.forName(mapTypeStr);
+        Class keyClazz = Class.forName(keyTypeStr);
+        Class valueClazz = Class.forName(valueTypeStr);
+        object = JsonUtil.toMap(data, mapClazz, keyClazz, valueClazz);
+        System.out.println(object);
+
+        // test jackson TypeParser
+        TypeParser parser = new TypeParser(TypeFactory.defaultInstance());
+        JavaType javaType = parser.parse("[Ljava.lang.String;");
+        object = JsonUtil.toBeanWithJavaType("[\"1\",\"2\"]", javaType);
+        System.out.println(object);
     }
 }
