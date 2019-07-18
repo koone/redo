@@ -62,9 +62,9 @@ public class RedoService extends ApplicationObjectSupport {
         redoItem.setCreateTime(new Date());
         redoItem.setFailMessage(getFailMessage(t));
         // 异步保存
-        taskExecutor.submit((Runnable) () -> {
+        taskExecutor.submit( () -> {
             try {
-               mapper.insertSelective(redoItem);
+                mapper.insertSelective(redoItem);
             } catch (Exception e) {
                 log.error("save redo item {} error", redoItem,e);
             }
@@ -169,7 +169,7 @@ public class RedoService extends ApplicationObjectSupport {
      * 将bizInvokeArgs数组中的每个arg按照格式排列: <br>
      * arg0ClazzName, arg0ValueJsonStr, arg1ClazzName, arg1ValueJsonStr, arg2ClazzName, arg2ValueJsonStr<br>
      * 重排之后的队列序列化成json array string，存入到持久化层
-     * @see com.lk.redo.service.DefaultRedoHandler#deserialize(Class[], String)
+     * @see com.lk.redo.service.DefaultRedoHandler#deserialize(String)
      * @return json array string
      */
     public String serialize(Object[] args) {
@@ -214,15 +214,15 @@ public class RedoService extends ApplicationObjectSupport {
             if (!collectionParam.isEmpty()) {
                 String itemType = null;
                 Iterator iterator = collectionParam.iterator();
-                while (iterator.hasNext() && itemType != null) {
+                while (iterator.hasNext()) {
                     Object item = iterator.next();
                     if (null != item) {
-                        itemType = item.getClass().getName();
+                        itemType = getRealTypeName(item);
                         break;
                     }
                 }
                 if (null != itemType) {
-                    typeName = typeName + "<" + itemType == null ? "" : itemType + ">";
+                    typeName = typeName + "<" + itemType + ">";
                 }
             }
         } else if (param instanceof Map) {
@@ -236,15 +236,15 @@ public class RedoService extends ApplicationObjectSupport {
                 while (keySetIt.hasNext() && (null == keyType || null == valueType)) {
                     Object key = keySetIt.next();
                     if (null == keyType && null != key) {
-                        keyType = key.getClass().getName();
+                        keyType = getRealTypeName(key);
                     }
                     Object value = mapParam.get(key);
                     if (null == valueType && null != value) {
-                        valueType = value.getClass().getName();
+                        valueType = getRealTypeName(key);
                     }
                 }
-                if (null != valueType && null != keyType) {
-                    typeName = typeName+ "<" + keyType == null ? "" : keyType + ","+ valueType == null ? "" :valueType + ">";
+                if (null != valueType || null != keyType) {
+                    typeName = typeName+ "<" + keyType == null ? "java.lang.Object" : keyType + ","+ valueType == null ? "java.lang.Object" :valueType + ">";
                 }
             }
         }
@@ -258,7 +258,6 @@ public class RedoService extends ApplicationObjectSupport {
         System.out.println(JsonUtil.toJson(bb));
         JsonUtil.toList("[\"1\",\"2\"]", String.class).toArray();
     }
-
 
     private String getFailMessage(Throwable t) {
         if (t == null) {
@@ -286,6 +285,7 @@ public class RedoService extends ApplicationObjectSupport {
             throw new RedoException("no redoHandler instance named " + handlerBeanName + " is defined", e);
         }
     }
+
 
     public static boolean isRedoWorkModel() {
         return WORK_MODEL.get() == null ? false : WORK_MODEL.get();

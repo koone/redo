@@ -32,11 +32,6 @@ import java.util.regex.Pattern;
 @Service("defaultRedoHandler")
 public class DefaultRedoHandler extends ApplicationObjectSupport implements RedoHandler {
 
-
-    private static final Pattern arrayPattern = Pattern.compile("\\[L.+;"); // 数组类型正则
-    private static final Pattern collectionPattern = Pattern.compile("(.+)<([^,]+)>"); //集合类型正则
-    private static final Pattern mapPattern = Pattern.compile("(.+)<(.+),(.+)>"); // map类型正则
-
     @Override
     public void redo(SysRedo redoItem) {
         RedoCheckUtils.check((null == redoItem || redoItem.getBizInvokeClazz() == null || redoItem.getBizInvokeMethod() == null),
@@ -73,11 +68,11 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
     /**
      * 将getBizInvokeArgsStr()序列化得到的json array string，反序列化
      *
-     * @see com.lk.redo.service.RedoService#serialize(Object[])
+     * @see com.sunlands.insurance.redo.service.RedoService#serialize(Object[])
      * @param bizInvokeArgsStr 序列化的json array string
      * @return argValue pair
      */
-    public Object[] deserialize(String bizInvokeArgsStr) throws ClassNotFoundException {
+    public Object[] deserialize(String bizInvokeArgsStr) {
         if (bizInvokeArgsStr == null || bizInvokeArgsStr.trim().isEmpty()) {
             return null;
         }
@@ -119,41 +114,16 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
     /**
      * 通过json 反序列化：支持普通类型、Array类型、Collection、Map类型
      *
-     * @see com.lk.redo.service.RedoService#getRealTypeName(Object)
+     * @see com.sunlands.insurance.redo.service.RedoService#getRealTypeName(Object)
      * @param typeStr 数据类型
      * @param dataJsonStr 数据json字符串
      * @return
      */
-    private Object deserializeByJson(String typeStr, String dataJsonStr) throws ClassNotFoundException {
+    private Object deserializeByJson(String typeStr, String dataJsonStr) {
         // array type
-        Matcher arrayMacher = arrayPattern.matcher(typeStr);
-        if (arrayMacher.find()){
-            Class clazz = Class.forName(typeStr);
-            return JsonUtil.toArray(dataJsonStr, clazz);
-        }
-        // collection type
-        Matcher collectionMacher = collectionPattern.matcher(typeStr);
-        if (collectionMacher.find()){
-            String collectionTypeStr = collectionMacher.group(1);
-            String genericTypeStr =  collectionMacher.group(2);
-            Class collectionClazz = Class.forName(collectionTypeStr);
-            Class contentClazz = Class.forName(genericTypeStr);
-            return JsonUtil.toCollection(dataJsonStr, collectionClazz, contentClazz);
-        }
-        // map type
-        Matcher mapMacher = mapPattern.matcher(typeStr);
-        if (mapMacher.find()){
-            String mapTypeStr = mapMacher.group(1);
-            String keyTypeStr = mapMacher.group(2);
-            String valueTypeStr = mapMacher.group(3);
-            Class mapClazz = Class.forName(mapTypeStr);
-            Class keyClazz = Class.forName(keyTypeStr);
-            Class valueClazz = Class.forName(valueTypeStr);
-            return JsonUtil.toMap(dataJsonStr, mapClazz, keyClazz, valueClazz);
-        }
-        // normal type
-        Class clazz = Class.forName(typeStr);
-        return JsonUtil.toBean(dataJsonStr, clazz);
+        TypeParser parser = new TypeParser(TypeFactory.defaultInstance());
+        JavaType javaType = parser.parse(typeStr);
+        return JsonUtil.toBeanWithJavaType(dataJsonStr, javaType);
     }
 
     public static void main(String[] args) throws ClassNotFoundException {
@@ -171,7 +141,7 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
             System.out.println(object);
         }
         // test complex array
-        typeStr = "[Lcom.lk.redo.model.SysRedo;";
+        typeStr = "[Lcom.sunlands.insurance.redo.model.SysRedo;";
         clazz = Class.forName(typeStr);
         data = "[{\"id\":1},{\"id\":2}]";
         object = JsonUtil.toArray(data, clazz);
@@ -215,7 +185,7 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
         // test jackson TypeParser
         TypeParser parser = new TypeParser(TypeFactory.defaultInstance());
         JavaType javaType = parser.parse("[Ljava.lang.String;");
-        object = JsonUtil.toBeanWithJavaType("[\"1\",\"2\"]", javaType);
+        object = JsonUtil.toBeanWithJavaType("", javaType);
         System.out.println(object);
     }
 }
