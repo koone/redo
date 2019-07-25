@@ -1,5 +1,6 @@
 package com.lk.redo.service;
 
+import com.google.common.collect.Lists;
 import com.lk.redo.annotation.Redo;
 import com.lk.redo.commons.util.enums.VoCodeEnum;
 import com.lk.redo.commons.util.exception.BusinessException;
@@ -19,9 +20,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
+import java.lang.reflect.Method;
+import java.lang.reflect.Type;
+import java.util.*;
 
 /**
  * redo service
@@ -38,6 +39,7 @@ public class RedoService extends ApplicationObjectSupport {
 
     @Resource
     private SysRedoMapper mapper;
+
 
 
     /**
@@ -57,15 +59,16 @@ public class RedoService extends ApplicationObjectSupport {
         if (invokeClass != null) {
             redoItem.setBizInvokeClazz(invokeClass.getName());
             redoItem.setBizInvokeMethod(invokeMethod.getName());
-            redoItem.setBizInvokeMethodArgtype(JsonUtil.toJson(invokeMethod.getParameterTypes()));
+            String[] parameterTypes = getMethodActualParameterType(invokeMethod);
+            redoItem.setBizInvokeMethodArgtype(JsonUtil.toJson(parameterTypes));
         }
         redoItem.setBizInvokeArgs(serialize(args));
         redoItem.setCreateTime(new Date());
         redoItem.setFailMessage(getFailMessage(t));
         // 异步保存
-        taskExecutor.submit((Runnable) () -> {
+        taskExecutor.submit( () -> {
             try {
-               mapper.insertSelective(redoItem);
+                mapper.insertSelective(redoItem);
             } catch (Exception e) {
                 log.error("save redo item {} error", redoItem,e);
             }
@@ -167,30 +170,50 @@ public class RedoService extends ApplicationObjectSupport {
 
 
     /**
-     * 将bizInvokeArgs数组中的每个arg按照格式排列: <br>
-     * arg0ClazzName, arg0ValueJsonStr, arg1ClazzName, arg1ValueJsonStr, arg2ClazzName, arg2ValueJsonStr<br>
-     * 重排之后的队列序列化成json array string，存入到持久化层
-     *
+     * 直接通过json序列化数据 <br>
+     * 反序列化的时候根据方法参数类型做json反序列化
+     * @see com.lk.redo.service.DefaultRedoHandler#deserialize(String, String)
      * @return json array string
      */
     public String serialize(Object[] args) {
-        if (args == null) {
-            return "";
-        }
-        List<Object> argNameAndValueList = new ArrayList<Object>();
-        for (Object arg : args) {
-            if (arg != null) {
-                argNameAndValueList.add(arg.getClass().getName());
-                argNameAndValueList.add(JsonUtil.toJson(arg));
-            }else{
-                argNameAndValueList.add(null);
-                argNameAndValueList.add(null);
-            }
-
-        }
-        return JsonUtil.toJson(argNameAndValueList);
+        return JsonUtil.toJson(args);
     }
 
+    /**
+     * 获取方法定义的参数类型
+     * @param methodSignature aspectJ方法签名
+     * @return
+     */
+    private String[] getMethodActualParameterType(MethodSignature methodSignature) {
+        Method method = methodSignature.getMethod();
+        Type[] genericParameterTypes = method.getGenericParameterTypes();
+        String[] typeNames = new String[genericParameterTypes.length];
+        for (int i = 0; i < genericParameterTypes.length; i++) {
+            typeNames[i] = JsonUtil.toCanonical(genericParameterTypes[i]);
+        }
+        return typeNames;
+
+    }
+
+
+    public static void main(String[] args) throws NoSuchMethodException {
+        String[] aa = new String[]{"1", "2"};
+        List<String> bb = Lists.newArrayList("1", "2");
+        System.out.println(JsonUtil.toJson(aa));
+        System.out.println(JsonUtil.toJson(bb));
+        JsonUtil.toList("[\"1\",\"2\"]", String.class).toArray();
+        String aaa = JsonUtil.toJson(null);
+        System.out.println(aaa);
+        Method method = RedoService.class.getMethod("autoRedo");
+        Type[] genericParameterTypes = method.getGenericParameterTypes();
+        String[] typeNames = new String[genericParameterTypes.length];
+        for (int i = 0; i < genericParameterTypes.length; i++) {
+            typeNames[i] = JsonUtil.toCanonical(genericParameterTypes[i]);
+        }
+        System.out.println(JsonUtil.toJson(typeNames));
+        System.out.println(JsonUtil.toJson(null));
+        //System.out.println(genericParameterTypes);
+    }
 
     private String getFailMessage(Throwable t) {
         if (t == null) {

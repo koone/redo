@@ -1,9 +1,11 @@
 package com.lk.redo.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.lk.redo.commons.util.utils.JsonUtil;
 import com.lk.redo.model.RedoException;
 import com.lk.redo.model.SysRedo;
 import com.lk.redo.util.RedoCheckUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.aop.scope.ScopedProxyUtils;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.ApplicationObjectSupport;
@@ -13,6 +15,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 
 /**
@@ -29,7 +33,7 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
     @Override
     public void redo(SysRedo redoItem) {
         RedoCheckUtils.check((null == redoItem || redoItem.getBizInvokeClazz() == null || redoItem.getBizInvokeMethod() == null),
-            "bizInvokeClazz is null, and cannot be handled by defaultRedoHandler");
+                "bizInvokeClazz is null, and cannot be handled by defaultRedoHandler");
         Class<?> bizClazz = null;
         try {
             bizClazz = Class.forName(redoItem.getBizInvokeClazz());
@@ -40,9 +44,7 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
         Object bizBean = getBeanInstence(bizClazz);
         // get method declared args
         String methodArgTypeStr = redoItem.getBizInvokeMethodArgtype();
-        List<Class> argClazzs = JsonUtil.toList(methodArgTypeStr, Class.class);
-        Class[] methodArgTypes = new Class[argClazzs.size()];
-        argClazzs.toArray(methodArgTypes);
+        Class[] methodArgTypes= JsonUtil.toRawType(methodArgTypeStr);
         // get method
         Method m = null;
         try {
@@ -50,9 +52,9 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
         } catch (Exception e) {
             throw new RedoException("failed to get biz method for " + redoItem, e);
         }
-        // invoke
-        Object[] args = deserialize(methodArgTypes,redoItem.getBizInvokeArgs());
         try {
+            // invoke
+            Object[] args = deserialize(redoItem.getBizInvokeArgs(), methodArgTypeStr);
             m.invoke(bizBean, args);
         } catch (Exception e) {
             throw new RedoException("failed to invoke biz method for " + redoItem, e);
@@ -62,38 +64,34 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
     /**
      * 将getBizInvokeArgsStr()序列化得到的json array string，反序列化
      *
-     *
-     * @param methodArgTypes
-     * @param bizInvokeArgsStr 序列化的json array string
+     * @see com.lk.redo.service.RedoService#serialize(Object[])
+     * @param bizInvokeArgsStr 序列化的json array string 参数值
+     * @param methodArgTypeStr 序列化的json array string 参数类型
      * @return argValue pair
      */
-    public static Object[] deserialize(Class[] methodArgTypes, String bizInvokeArgsStr) {
-        if (bizInvokeArgsStr == null || bizInvokeArgsStr.trim().isEmpty()) {
+    public Object[] deserialize(String bizInvokeArgsStr, String methodArgTypeStr) {
+        if (StringUtils.isBlank(bizInvokeArgsStr) || StringUtils.isBlank(methodArgTypeStr)) {
             return null;
         }
-        List<String> argNameAndValueList = JsonUtil.toList(bizInvokeArgsStr, String.class);
-        Iterator<String> iterator = argNameAndValueList.iterator();
+        List<JsonNode> argNameAndValueList = JsonUtil.toList(bizInvokeArgsStr, JsonNode.class);
+        List<String> methodArgTypeList = JsonUtil.toList(methodArgTypeStr, String.class);
+        /*if (mehtodArgTypeList.isEmpty()) { // no arg method
+            return null;
+        }*/
+        if (argNameAndValueList.size() != methodArgTypeList.size()) {
+            throw new RedoException("failed to deserialize param");
+        }
         List<Object> args = new ArrayList<Object>();
-        int index = 0;
-        while (iterator.hasNext()) {
-            String clazzName = iterator.next();
-            String argValue = iterator.next();
-            Class<?> clazz = null;
-            try {
-                if (clazzName == null || clazzName == "null") {
-                    clazz = methodArgTypes[index];
-                }else {
-                    clazz = Class.forName(clazzName);
-                }
-            } catch (ClassNotFoundException e) {
-                throw new RuntimeException(e);
-            }
+        for (int i = 0; i < argNameAndValueList.size(); i++) {
+            String clazzName = methodArgTypeList.get(i);
+            JsonNode argValue = argNameAndValueList.get(i);
             Object arg = null;
-            if (clazz != null && argValue != null) {
-                arg = JsonUtil.toBean(argValue, clazz);
+            if (clazzName == null || clazzName == "null" || StringUtils.isBlank(clazzName)) {
+                // do nothing
+            }else {
+                arg = JsonUtil.toBeanWithCanonical(argValue.toString(), clazzName);
             }
             args.add(arg);
-            index++;
         }
         return args.toArray();
     }
@@ -113,5 +111,70 @@ public class DefaultRedoHandler extends ApplicationObjectSupport implements Redo
         RedoCheckUtils.check(bizBeans != null && bizBeans.size() == 1);
         Object bizBean = bizBeans.values().iterator().next();
         return bizBean;
+    }
+
+
+    public static void main(String[] args) throws ClassNotFoundException {
+        // test array
+        String typeStr = "[Ljava.lang.String;";
+        Pattern p = Pattern.compile("\\[L.+;");
+        Matcher m = p.matcher(typeStr);
+        Class clazz = null;
+        String data = null;
+        Object object = null;
+        if (m.find()) {
+            clazz = Class.forName(typeStr);
+            data = "[\"1\",\"2\"]";
+            object = JsonUtil.toArray(data, clazz);
+            System.out.println(object);
+        }
+        // test complex array
+        typeStr = "[Lcom.sunlands.insurance.redo.model.SysRedo;";
+        clazz = Class.forName(typeStr);
+        data = "[{\"id\":1},{\"id\":2}]";
+        object = JsonUtil.toArray(data, clazz);
+        System.out.println(object);
+
+        // test collection
+        typeStr = "java.util.ArrayList<java.lang.String>";
+        p = Pattern.compile("(.+)<([^,]+)>");
+        m = p.matcher(typeStr);
+        String collectionTypeStr = null;
+        String genericTypeStr = null;
+        if (m.find()) {
+            collectionTypeStr = m.group(1);
+            genericTypeStr = m.group(2);
+        }
+        data = "[\"1\",\"2\"]";
+        Class collectionClazz = Class.forName(collectionTypeStr);
+        Class contentClazz = Class.forName(genericTypeStr);
+        object = JsonUtil.toCollection(data, collectionClazz, contentClazz);
+        System.out.println(object);
+
+        // test map
+        typeStr = "java.util.HashMap<java.lang.String,java.lang.Long>";
+        p = Pattern.compile("(.+)<(.+),(.+)>");
+        m = p.matcher(typeStr);
+        String mapTypeStr = null;
+        String keyTypeStr = null;
+        String valueTypeStr = null;
+        if (m.find()) {
+            mapTypeStr = m.group(1);
+            keyTypeStr = m.group(2);
+            valueTypeStr = m.group(3);
+        }
+        data = "{\"a\": 1,\"b\": 2,\"c\": 3}";
+        Class mapClazz = Class.forName(mapTypeStr);
+        Class keyClazz = Class.forName(keyTypeStr);
+        Class valueClazz = Class.forName(valueTypeStr);
+        object = JsonUtil.toMap(data, mapClazz, keyClazz, valueClazz);
+        System.out.println(object);
+
+        // test jackson TypeParser
+        object = JsonUtil.toBeanWithCanonical("[\"1\",\"2\"]", "[Ljava.lang.String;");
+        Class[] type = JsonUtil.toRawType("[\"[Lcom.sunlands.insurance.redo.model.SysRedo;\"]");
+        SysRedo[] redoList = new SysRedo[2];
+        System.out.println(redoList.getClass());
+        System.out.println(object);
     }
 }
