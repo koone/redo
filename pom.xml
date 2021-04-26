@@ -28,7 +28,7 @@
         <druid.springboot.starter.version>1.1.9</druid.springboot.starter.version>
         <commons-lang3.version>3.7</commons-lang3.version>
         <commons.collection.version>3.2.2</commons.collection.version>
-        <commons.io.version>2.6</commons.io.version>
+        <commons.io.version>2.7</commons.io.version>
         <lombok.version>1.16.20</lombok.version>
         <log4j2.version>2.10.0</log4j2.version>
         <commons-codec.version>1.11</commons-codec.version>
